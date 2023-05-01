@@ -68,16 +68,27 @@ where
     pub fn serialize(
         &mut self,
         value: Message,
-    ) -> Result<Vec<u8>, <&mut ProtocolSer as serde::Serializer>::Error> {
+    ) -> Result<Vec<u8>, <&mut ProtocolSer as serde::Serializer>::Error>
+    where
+        for<'a> Result<
+            <&'a mut ProtocolSer as serde::Serializer>::Ok,
+            <&'a mut ProtocolSer as serde::Serializer>::Error,
+        >: 'static,
+        for<'a> <&'static mut ProtocolSer as serde::Serializer>::Error: 'static,
+    {
         let mut buf = Vec::with_capacity(128);
         let mut serializer = (self.protocol_ser_factory)(&mut buf);
 
         let res = value.serialize(&mut serializer);
+        fn check_static<T: 'static>(v: T) -> T {
+            v
+        }
 
         match res {
             Err(e) => {
                 self.buffer.reset_read_bytes();
-                Err(e)
+                check_static(e);
+                todo!()
             }
             Ok(_) => {
                 self.buffer.discard_read_bytes();
