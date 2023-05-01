@@ -1,0 +1,11 @@
+[package]
+name = "connecteer"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Maix0/connecteer.git"
+description = "WIP - A high level network library that levrage serde's ability to (de)serialize vast types of data"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = "1.0.160"
