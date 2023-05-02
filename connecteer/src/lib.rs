@@ -74,7 +74,7 @@ where
             <&'a mut ProtocolSer as serde::Serializer>::Ok,
             <&'a mut ProtocolSer as serde::Serializer>::Error,
         >: 'static,
-        for<'a> <&'static mut ProtocolSer as serde::Serializer>::Error: 'static,
+        for<'a> <&'a mut ProtocolSer as serde::Serializer>::Error: 'static,
     {
         let mut buf = Vec::with_capacity(128);
         let mut serializer = (self.protocol_ser_factory)(&mut buf);
@@ -87,8 +87,7 @@ where
         match res {
             Err(e) => {
                 self.buffer.reset_read_bytes();
-                check_static(e);
-                todo!()
+                return Err(check_static(e)); // It says that it can't return something that borrows from serializer (borrowed at line 82)
             }
             Ok(_) => {
                 self.buffer.discard_read_bytes();
