@@ -23,7 +23,9 @@
       devShell = with pkgs; let
         cargo-ws = cargo-workspace.packages.${system}.default;
         cargo-sc = cargo-semver-checks.packages.${system}.default;
-        rust_dev = rust-bin.stable.latest.default;
+        rust_dev = rust-bin.nightly.latest.default.override {
+          extensions = ["miri" "rust-src"];
+        };
       in
         mkShell {
           nativeBuildInputs = [

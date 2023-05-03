@@ -43,6 +43,7 @@ impl std::io::Read for BufferRead<'_> {
         Ok(self
             .iter
             .by_ref()
+            .take(buf.len())
             .zip(buf.iter_mut())
             .map(|(&r, w)| *w = r)
             .inspect(|()| self.bytes_read.add_assign(1))
