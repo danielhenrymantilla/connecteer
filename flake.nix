@@ -35,8 +35,11 @@
             # Rust
             rust_dev
             cargo-sc
-            #cargo-semver-checks
+            
+			cargo-sc
             cargo-ws
+
+			fastmod
           ];
         };
     });

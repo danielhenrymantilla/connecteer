@@ -1,13 +1,13 @@
-extern crate connecteer;
+extern crate connecteer_translation;
 extern crate serde;
 extern crate serde_json;
 
-use connecteer::Connection;
+use connecteer_translation::{embedded_io::adapters::ToStd, Connection};
 
 fn main() {
-    let mut connection = Connection::new(
-        serde_json::Serializer::new,
-        serde_json::Deserializer::from_reader,
+    let mut connection = Connection::new_alloc(
+        |v| serde_json::Serializer::new(ToStd::new(v)),
+        |v| serde_json::Deserializer::from_reader(ToStd::new(v)),
     );
 
     let before = serde_json::json!({ /* Packet here */ });

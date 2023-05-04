@@ -1,11 +1,14 @@
-extern crate connecteer;
+extern crate connecteer_translation;
 extern crate rmp_serde;
 extern crate serde;
 
-use connecteer::Connection;
+use connecteer_translation::{embedded_io::adapters::ToStd, Connection};
 
 fn main() {
-    let mut connection = Connection::new(rmp_serde::Serializer::new, rmp_serde::Deserializer::new);
+    let mut connection = Connection::new_alloc(
+        |v| rmp_serde::Serializer::new(ToStd::new(v)),
+        |v| rmp_serde::Deserializer::new(ToStd::new(v)),
+    );
 
     let before = Something {
         foo: "Hello".to_string(),
