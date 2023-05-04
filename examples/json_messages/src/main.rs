@@ -2,9 +2,7 @@ extern crate connecteer;
 extern crate serde;
 extern crate serde_json;
 
-use connecteer::{Connection, SignalDrop};
-use serde::{Deserialize, Serialize};
-use serde_json::{Deserializer, Serializer};
+use connecteer::Connection;
 
 fn main() {
     let mut connection = Connection::new(
@@ -12,11 +10,10 @@ fn main() {
         serde_json::Deserializer::from_reader,
     );
 
-    let val = connection
-        .serialize(serde_json::json!({"hello": "world"}))
-        .unwrap();
+    let before = serde_json::json!({ /* Packet here */ });
+
+    let val = connection.serialize(before.clone()).unwrap();
     connection.feed_bytes(&val);
 
-    println!("{val:02X?}\n{}", String::from_utf8(val.clone()).unwrap());
-    dbg!(connection.try_deserialize().unwrap());
+    assert_eq!(before, connection.try_deserialize().unwrap());
 }

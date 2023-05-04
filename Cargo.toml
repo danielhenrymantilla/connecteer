@@ -1,6 +1,6 @@
 [workspace]
 members = [
-	"./connecteer/",
-	"./examples/json_messages/"
+  "./connecteer/",
+  "./examples/json_messages/",
+  "./examples/rmp_messages/",
 ]
-

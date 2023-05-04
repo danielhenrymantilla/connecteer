@@ -1,0 +1,11 @@
+[package]
+name = "rmp_messages"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+connecteer = { version = "0.0.0", path = "../../connecteer" }
+rmp-serde = "1.1.1"
+serde = { version = "1.0.160", features = ["derive"] }
