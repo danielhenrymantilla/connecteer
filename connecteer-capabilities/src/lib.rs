@@ -27,6 +27,26 @@ pub fn test() {
     .unwrap()
     .unwrap();
 
+    let mut base2 = Base;
+
+    let res2 = <dyn Connection<
+        [u8; 5],
+        core::convert::Infallible,
+        core::convert::Infallible,
+        (),
+        Wrapped = identity::Wrapper<[u8; 5]>,
+        WrappedSendError = _,
+        WrappedReceiveError = _,
+    >>::send(
+        &mut base2,
+        Some(*b"hello" as [u8; 5]),
+        sealed::PublicUncallable,
+    )
+    .unwrap()
+    .unwrap();
+
+    core::mem::drop((base, base2));
+
     let s = core::str::from_utf8(&*res).unwrap();
 
     assert_eq!(s, "hello");
@@ -264,8 +284,7 @@ mod identity {
             WrappedSendError = Self::WrapError<SendError>,
             WrappedReceiveError = Self::UnwrapError<ReceiveError, ReceiveInputError>,
         > {
-            static mut ID: Identity = Identity;
-            (unsafe { &mut ID })
+            (unsafe { core::ptr::NonNull::<Identity>::dangling().as_mut() })
                 as &mut dyn crate::Connection<
                     Wrapper<M>,
                     SendError,
