@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 connecteer-capabilities = { version = "0.1.0", path = "../../connecteer-capabilities" }
+serde = "1.0.162"

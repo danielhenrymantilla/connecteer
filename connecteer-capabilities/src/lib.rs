@@ -6,156 +6,126 @@ mod sealed {
     pub struct PublicUncallable;
 
     pub trait Sealed<P> {}
+
+    pub trait PublicUncallableSealed {}
+
+    impl PublicUncallableSealed for PublicUncallable {}
 }
 
-pub fn test() {
-    let mut base = Base;
+pub trait PublicUncallable: sealed::PublicUncallableSealed {}
 
-    let res = <dyn Connection<
-        [u8; 5],
-        core::convert::Infallible,
-        core::convert::Infallible,
-        (),
-        Wrapped = identity::Wrapper<[u8; 5]>,
-        WrappedSendError = _,
-        WrappedReceiveError = _,
-    >>::send(
-        &mut base,
-        Some(*b"hello" as [u8; 5]),
-        sealed::PublicUncallable,
-    )
-    .unwrap()
-    .unwrap();
+impl PublicUncallable for sealed::PublicUncallable {}
 
-    let mut base2 = Base;
-
-    let res2 = <dyn Connection<
-        [u8; 5],
-        core::convert::Infallible,
-        core::convert::Infallible,
-        (),
-        Wrapped = identity::Wrapper<[u8; 5]>,
-        WrappedSendError = _,
-        WrappedReceiveError = _,
-    >>::send(
-        &mut base2,
-        Some(*b"hello" as [u8; 5]),
-        sealed::PublicUncallable,
-    )
-    .unwrap()
-    .unwrap();
-
-    core::mem::drop((base, base2));
-
-    let s = core::str::from_utf8(&*res).unwrap();
-
-    assert_eq!(s, "hello");
-}
+/// This is used when creating
+pub type NextConnection<'a, Over, This> = dyn Connection<
+        Over,
+        Wrapped = <This as Middleware<Over>>::NextWrapped,
+        SendError = <This as Middleware<Over>>::NextWrapError,
+        ReceiveError = <This as Middleware<Over>>::NextUnwrapError,
+        ReceiveInputError = <This as Middleware<Over>>::NextUnwrapInputError,
+    > + 'a;
 
 /// You can't implement this trait, you need to let the blanket implementation do its job by
 /// implementing [`Middleware`](crate::Middleware) on your types
-pub trait Connection<
-    Payload: Serialize + DeserializeOwned,
-    SendError,
-    ReceiveError,
-    ReceiveInputError,
->: sealed::Sealed<Payload>
-{
+pub trait Connection<Payload: Serialize + DeserializeOwned>: sealed::Sealed<Payload> {
     type Wrapped;
 
-    type WrappedSendError;
-    type WrappedReceiveError;
-
+    type SendError;
+    type ReceiveError;
+    type ReceiveInputError;
     fn send(
         &mut self,
         input: Option<Payload>,
         _: sealed::PublicUncallable,
-    ) -> Result<Option<Self::Wrapped>, Self::WrappedSendError>;
+    ) -> Result<Option<Self::Wrapped>, Self::SendError>;
     fn receive(
         &mut self,
-        output: Result<Option<Self::Wrapped>, ReceiveInputError>,
+        output: Result<Option<Self::Wrapped>, Self::ReceiveInputError>,
         _: sealed::PublicUncallable,
-    ) -> Result<Option<Payload>, Self::WrappedReceiveError>;
+    ) -> Result<Option<Payload>, Self::ReceiveError>;
 }
 
 pub trait Middleware<Over: Serialize + DeserializeOwned> {
-    type Message<T>: Serialize + DeserializeOwned
-    where
-        T: Serialize + DeserializeOwned;
+    type Message;
+    type WrapError;
+    type UnwrapError;
 
-    type WrapError<Inner>;
-    type UnwrapError<Inner, Passthrough>;
+    type NextWrapError;
+    type NextUnwrapError;
+    type NextUnwrapInputError;
 
-    fn unwrap<Err, Passthrough>(
+    type NextWrapped;
+
+    fn unwrap<Uncallable: PublicUncallable>(
         &mut self,
-        msg: Self::Message<Over>,
-    ) -> Result<Option<Over>, Self::UnwrapError<Err, Passthrough>>;
+        msg: Self::Message,
+        pemit: Uncallable,
+    ) -> Result<Option<Over>, Self::UnwrapError>;
 
-    fn wrap<Err>(&mut self, msg: Over)
-        -> Result<Option<Self::Message<Over>>, Self::WrapError<Err>>;
-
-    fn create_wrap_error<Err>(&mut self, err: Err) -> Self::WrapError<Err>;
-    fn create_unwrap_error<Err, ReceiveInputError>(
+    fn wrap<Uncallable: PublicUncallable>(
         &mut self,
-        err: Err,
-    ) -> Self::UnwrapError<Err, ReceiveInputError>;
+        msg: Over,
+        pemit: Uncallable,
+    ) -> Result<Option<Self::Message>, Self::WrapError>;
 
-    fn create_unwrap_error_passthrough<Err, ReceiveInputError>(
+    fn create_wrap_error<Uncallable: PublicUncallable>(
         &mut self,
-        err: ReceiveInputError,
-    ) -> Self::UnwrapError<Err, ReceiveInputError>;
+        err: Self::NextWrapError,
+        pemit: Uncallable,
+    ) -> Self::WrapError;
+    fn create_unwrap_error<Uncallable: PublicUncallable>(
+        &mut self,
+        err: Self::NextUnwrapError,
+        pemit: Uncallable,
+    ) -> Self::UnwrapError;
 
-    fn get_next<SendError, ReceiveError, ReceiveInputError>(
+    fn create_unwrap_error_passthrough<Uncallable: PublicUncallable>(
         &mut self,
-    ) -> &mut dyn Connection<
-        Self::Message<Over>,
-        SendError,
-        ReceiveError,
-        ReceiveInputError,
-        Wrapped = Self::Message<Over>,
-        WrappedSendError = Self::WrapError<SendError>,
-        WrappedReceiveError = Self::UnwrapError<ReceiveError, ReceiveInputError>,
-    >;
+        err: Self::NextUnwrapInputError,
+        pemit: Uncallable,
+    ) -> Self::UnwrapError;
+
+    fn get_next<Uncallable: PublicUncallable>(
+        &mut self,
+        pemit: Uncallable,
+    ) -> &mut NextConnection<'_, Over, Self>;
 }
 
 impl<M: Middleware<P>, P: Serialize + DeserializeOwned> sealed::Sealed<P> for M {}
 
-impl<
-        M: Middleware<Over>,
-        Over: Serialize + DeserializeOwned,
-        SendError,
-        ReceiveError,
-        ReceiveInputError,
-    > Connection<Over, SendError, ReceiveError, ReceiveInputError> for M
-{
-    type Wrapped = M::Message<Over>;
+impl<M: Middleware<Over>, Over: Serialize + DeserializeOwned> Connection<Over> for M {
+    type Wrapped = M::Message;
 
-    type WrappedSendError = M::WrapError<SendError>;
-    type WrappedReceiveError = M::UnwrapError<ReceiveError, ReceiveInputError>;
+    type SendError = M::WrapError;
+    type ReceiveError = M::UnwrapError;
+    type ReceiveInputError = M::NextUnwrapInputError;
 
     fn send(
         &mut self,
         input: Option<Over>,
         _: sealed::PublicUncallable,
-    ) -> Result<Option<Self::Wrapped>, Self::WrappedSendError> {
+    ) -> Result<Option<Self::Wrapped>, M::WrapError> {
         input
-            .map(|v| self.wrap(v))
+            .map(|v| self.wrap::<sealed::PublicUncallable>(v, sealed::PublicUncallable))
             .transpose()
             .map(core::option::Option::flatten)
     }
 
     fn receive(
         &mut self,
-        output: Result<Option<Self::Wrapped>, ReceiveInputError>,
+        output: Result<Option<Self::Wrapped>, Self::ReceiveInputError>,
         _: sealed::PublicUncallable,
-    ) -> Result<Option<Over>, Self::WrappedReceiveError> {
+    ) -> Result<Option<Over>, Self::ReceiveError> {
         output
             .transpose()
             .map(|o| {
                 o.map_err(|e| {
-                    self.create_unwrap_error_passthrough::<ReceiveError, ReceiveInputError>(e)
+                    self.create_unwrap_error_passthrough::<sealed::PublicUncallable>(
+                        e,
+                        sealed::PublicUncallable,
+                    )
                 })
-                .map(|v| self.unwrap::<ReceiveError, ReceiveInputError>(v))
+                .map(|v| self.unwrap::<sealed::PublicUncallable>(v, sealed::PublicUncallable))
             })
             .map(|e| match e {
                 Ok(Ok(v)) => Ok(v),
@@ -167,34 +137,50 @@ impl<
 }
 
 pub use identity::WrappingMiddleware as Base;
+
+#[repr(transparent)]
+pub struct IdentityWrapper<T>(pub T);
+
+impl<T> IdentityWrapper<T> {
+    #[inline]
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<T: serde::Serialize> serde::Serialize for IdentityWrapper<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for IdentityWrapper<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        T::deserialize(deserializer).map(Self)
+    }
+    fn deserialize_in_place<D>(deserializer: D, place: &mut Self) -> Result<(), D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <T as serde::Deserialize>::deserialize_in_place(deserializer, &mut place.0)
+    }
+}
+
 mod identity {
-    use core::ops::{Deref, DerefMut};
 
     #[repr(transparent)]
     pub struct Wrapper<T>(T);
 
-    impl<T> Deref for Wrapper<T> {
-        type Target = T;
-        fn deref(&self) -> &Self::Target {
-            &self.0
-        }
-    }
-
-    impl<T> DerefMut for Wrapper<T> {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.0
-        }
-    }
-
-    impl<T> AsRef<T> for Wrapper<T> {
-        fn as_ref(&self) -> &T {
-            &self.0
-        }
-    }
-
-    impl<T> AsMut<T> for Wrapper<T> {
-        fn as_mut(&mut self) -> &mut T {
-            &mut self.0
+    impl<T> Wrapper<T> {
+        #[inline]
+        pub fn into_inner(self) -> T {
+            self.0
         }
     }
 
@@ -225,30 +211,27 @@ mod identity {
     impl<P> crate::sealed::Sealed<Wrapper<P>> for Identity {}
 
     struct Identity;
-    impl<
-            P: crate::Serialize + crate::DeserializeOwned,
-            SendError,
-            ReceiveInputError,
-            ReceiveError,
-        > crate::Connection<Wrapper<P>, SendError, ReceiveError, ReceiveInputError> for Identity
-    {
-        type Wrapped = Wrapper<P>;
-        type WrappedSendError = SendError;
-        type WrappedReceiveError = ReceiveInputError;
+    impl<P: crate::Serialize + crate::DeserializeOwned> crate::Connection<Wrapper<P>> for Identity {
+        type Wrapped = P;
+
+        type ReceiveError = core::convert::Infallible;
+        type ReceiveInputError = core::convert::Infallible;
+        type SendError = core::convert::Infallible;
+
         fn send(
             &mut self,
             input: Option<Wrapper<P>>,
             _: crate::sealed::PublicUncallable,
-        ) -> Result<Option<Self::Wrapped>, Self::WrappedSendError> {
-            Ok(input)
+        ) -> Result<Option<P>, Self::SendError> {
+            Ok(input.map(Wrapper::into_inner))
         }
 
         fn receive(
             &mut self,
-            output: Result<Option<Self::Wrapped>, ReceiveInputError>,
+            output: Result<Option<P>, Self::ReceiveInputError>,
             _: crate::sealed::PublicUncallable,
-        ) -> Result<Option<Wrapper<P>>, Self::WrappedReceiveError> {
-            output
+        ) -> Result<core::option::Option<Wrapper<P>>, Self::ReceiveInputError> {
+            Ok(unsafe { output.unwrap_unchecked().map(Wrapper) })
         }
     }
 
@@ -257,60 +240,76 @@ mod identity {
     impl<M: serde::de::DeserializeOwned + serde::Serialize> crate::Middleware<M>
         for WrappingMiddleware
     {
-        type Message<T> = Wrapper<T> where T: serde::Serialize + serde::de::DeserializeOwned;
+        type Message = Wrapper<M>;
 
-        type WrapError<Inner> = Inner;
-        type UnwrapError<Inner, Passthrough> = Passthrough;
+        type WrapError = core::convert::Infallible;
+        type UnwrapError = core::convert::Infallible;
 
-        fn wrap<Err>(&mut self, msg: M) -> Result<Option<Self::Message<M>>, Self::WrapError<Err>> {
+        type NextUnwrapError = core::convert::Infallible;
+        type NextWrapError = core::convert::Infallible;
+        type NextUnwrapInputError = core::convert::Infallible;
+
+        type NextWrapped = Wrapper<M>;
+
+        fn wrap<Uncallable: crate::PublicUncallable>(
+            &mut self,
+            msg: M,
+            _permit: Uncallable,
+        ) -> Result<Option<Self::Message>, Self::WrapError> {
             Ok(Some(Wrapper(msg)))
         }
 
-        fn unwrap<Err, Passthrough>(
+        fn unwrap<Uncallable: crate::PublicUncallable>(
             &mut self,
-            msg: Self::Message<M>,
-        ) -> Result<Option<M>, Self::UnwrapError<Err, Passthrough>> {
+            msg: Self::Message,
+            _permit: Uncallable,
+        ) -> Result<Option<M>, Self::UnwrapError> {
             Ok(Some(msg.0))
         }
 
-        fn get_next<SendError, ReceiveError, ReceiveInputError>(
+        fn get_next<Uncallable: crate::PublicUncallable>(
             &mut self,
+            _permit: Uncallable,
         ) -> &mut dyn crate::Connection<
-            Wrapper<M>,
-            SendError,
-            ReceiveError,
-            ReceiveInputError,
-            Wrapped = Self::Message<M>,
-            WrappedSendError = Self::WrapError<SendError>,
-            WrappedReceiveError = Self::UnwrapError<ReceiveError, ReceiveInputError>,
+            M,
+            Wrapped = Wrapper<M>,
+            SendError = core::convert::Infallible,
+            ReceiveError = core::convert::Infallible,
+            ReceiveInputError = core::convert::Infallible,
         > {
-            (unsafe { core::ptr::NonNull::<Identity>::dangling().as_mut() })
-                as &mut dyn crate::Connection<
-                    Wrapper<M>,
-                    SendError,
-                    ReceiveError,
-                    ReceiveInputError,
-                    Wrapped = Self::Message<M>,
-                    WrappedSendError = Self::WrapError<SendError>,
-                    WrappedReceiveError = Self::UnwrapError<ReceiveError, ReceiveInputError>,
-                >
+            unsafe {
+                core::mem::transmute(core::ptr::NonNull::<Identity>::dangling().as_mut()
+                    as &mut dyn crate::Connection<
+                        Wrapper<M>,
+                        Wrapped = M,
+                        SendError = core::convert::Infallible,
+                        ReceiveError = core::convert::Infallible,
+                        ReceiveInputError = core::convert::Infallible,
+                    >)
+            }
         }
 
-        fn create_wrap_error<Err>(&mut self, err: Err) -> Self::WrapError<Err> {
+        fn create_wrap_error<Uncallable: crate::PublicUncallable>(
+            &mut self,
+            err: Self::NextWrapError,
+            _permit: Uncallable,
+        ) -> Self::WrapError {
             err
         }
 
-        fn create_unwrap_error<Err, ReceiveInputError>(
+        fn create_unwrap_error<Uncallable: crate::PublicUncallable>(
             &mut self,
-            _err: Err,
-        ) -> Self::UnwrapError<Err, ReceiveInputError> {
-            unreachable!()
+            err: Self::NextUnwrapError,
+            _permit: Uncallable,
+        ) -> Self::UnwrapError {
+            err
         }
 
-        fn create_unwrap_error_passthrough<Err, ReceiveInputError>(
+        fn create_unwrap_error_passthrough<Uncallable: crate::PublicUncallable>(
             &mut self,
-            err: ReceiveInputError,
-        ) -> Self::UnwrapError<Err, ReceiveInputError> {
+            err: Self::NextUnwrapInputError,
+            _permit: Uncallable,
+        ) -> Self::UnwrapError {
             err
         }
     }
