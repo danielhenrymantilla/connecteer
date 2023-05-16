@@ -5,14 +5,17 @@ fn main() {
 }
 
 pub fn test() {
-    let mut base =
-        Pipeline::<String, _>::new(id::IdMiddleware::new(log::LoggingMiddleware::new(Base)));
+    let mut base = Pipeline::<String, _, ()>::new(
+        id::IdMiddleware::new(log::LoggingMiddleware::new(Base)),
+        (),
+    );
     //let mut base = log::LoggingMiddleware::new(Base);
     for line in std::io::stdin().lines() {
         let line = line.unwrap();
+        let line2 = line.clone();
         let _ = base.receive(Wrapper(Wrapper(id::MessageWithId::msg(line))));
         let _ = base
-            .send("hello world!".to_string())
+            .send(line2+", You!")
             .unwrap()
             .unwrap()
             .into_inner()
@@ -28,13 +31,19 @@ mod id {
 
     pub struct IdMiddleware<
         Payload: serde::de::DeserializeOwned + serde::Serialize,
-        Next: crate::Connection<MessageWithId<Payload>>,
-    >(Next, Ctx, std::marker::PhantomData<fn() -> Payload>);
+        Next: crate::Connection<MessageWithId<Payload>, Context>,
+        Context,
+    >(
+        Next,
+        Ctx,
+        std::marker::PhantomData<fn() -> (Payload, Context)>,
+    );
 
     impl<
             Payload: serde::de::DeserializeOwned + serde::Serialize,
-            Next: crate::Connection<MessageWithId<Payload>>,
-        > IdMiddleware<Payload, Next>
+            Next: crate::Connection<MessageWithId<Payload>, Context>,
+            Context,
+        > IdMiddleware<Payload, Next, Context>
     {
         pub fn new(next: Next) -> Self {
             Self(next, Ctx { current_id: 0 }, std::marker::PhantomData)
@@ -56,8 +65,9 @@ mod id {
 
     impl<
             Payload: serde::de::DeserializeOwned + serde::Serialize,
-            Next: crate::Connection<MessageWithId<Payload>>,
-        > crate::Middleware<Payload> for IdMiddleware<Payload, Next>
+            Next: crate::Connection<MessageWithId<Payload>, Context>,
+            Context,
+        > crate::Middleware<Payload, Context> for IdMiddleware<Payload, Next, Context>
     {
         type Message = MessageWithId<Payload>;
 
@@ -72,6 +82,7 @@ mod id {
         fn wrap<Uncallable: connecteer_capabilities::PublicUncallable>(
             &mut self,
             msg: Payload,
+            _: &mut Context,
         ) -> Result<Option<Self::Message>, Self::WrapError> {
             let id = self.1.current_id;
             self.1.current_id += 1;
@@ -81,13 +92,14 @@ mod id {
         fn unwrap<Uncallable: connecteer_capabilities::PublicUncallable>(
             &mut self,
             msg: Self::Message,
+            _: &mut Context,
         ) -> Result<Option<Payload>, Self::UnwrapError> {
             Ok(Some(msg.1))
         }
 
         fn get_next<Uncallable: connecteer_capabilities::PublicUncallable>(
             &mut self,
-        ) -> &mut connecteer_capabilities::NextConnection<'_, Payload, Self> {
+        ) -> &mut connecteer_capabilities::NextConnection<'_, Payload, Self, Context> {
             &mut self.0
         }
 
@@ -120,13 +132,18 @@ mod log {
 
     pub struct LoggingMiddleware<
         Payload: serde::de::DeserializeOwned + serde::Serialize,
-        Next: crate::Connection<crate::Wrapper<Payload>>,
-    >(pub Next, pub std::marker::PhantomData<fn() -> Payload>);
+        Next: crate::Connection<crate::Wrapper<Payload>, Context>,
+        Context,
+    >(
+        pub Next,
+        pub std::marker::PhantomData<fn() -> (Payload, Context)>,
+    );
 
     impl<
             Over: serde::de::DeserializeOwned + serde::Serialize,
-            Next: crate::Connection<crate::Wrapper<Over>>,
-        > LoggingMiddleware<Over, Next>
+            Next: crate::Connection<crate::Wrapper<Over>, Context>,
+            Context,
+        > LoggingMiddleware<Over, Next, Context>
     {
         pub fn new(next: Next) -> Self {
             Self(next, core::marker::PhantomData)
@@ -134,8 +151,9 @@ mod log {
     }
     impl<
             Over: serde::de::DeserializeOwned + serde::Serialize,
-            Next: crate::Connection<crate::Wrapper<Over>>,
-        > crate::Middleware<Over> for LoggingMiddleware<Over, Next>
+            Next: crate::Connection<crate::Wrapper<Over>, Context>,
+            Context,
+        > crate::Middleware<Over, Context> for LoggingMiddleware<Over, Next, Context>
     {
         type Message = crate::Wrapper<Over>;
 
@@ -150,6 +168,7 @@ mod log {
         fn wrap<Uncallable: crate::PublicUncallable>(
             &mut self,
             msg: Over,
+            _: &mut Context,
         ) -> Result<Option<Self::Message>, Self::WrapError> {
             print!("\x1B[32m");
             ron::ser::to_writer_pretty(
@@ -165,6 +184,7 @@ mod log {
         fn unwrap<Uncallable: crate::PublicUncallable>(
             &mut self,
             msg: Self::Message,
+            _: &mut Context,
         ) -> Result<Option<Over>, Self::UnwrapError> {
             print!("\x1B[94m");
             ron::ser::to_writer_pretty(
@@ -179,7 +199,7 @@ mod log {
 
         fn get_next<Uncallable: crate::PublicUncallable>(
             &mut self,
-        ) -> &mut crate::NextConnection<'_, Over, Self> {
+        ) -> &mut crate::NextConnection<'_, Over, Self, Context> {
             &mut self.0
         }
 
