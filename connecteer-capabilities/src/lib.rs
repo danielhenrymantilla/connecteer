@@ -1,9 +1,4 @@
-#![feature(
-    type_alias_impl_trait,
-    impl_trait_in_assoc_type,
-    generators,
-    generator_trait
-)]
+#![feature(impl_trait_in_assoc_type, generators, generator_trait)]
 #![no_std]
 use core::ops::{Generator, GeneratorState};
 
