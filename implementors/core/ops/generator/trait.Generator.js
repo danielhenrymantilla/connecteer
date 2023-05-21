@@ -1,0 +1,3 @@
+(function() {var implementors = {
+"connecteer_capabilities":[["impl&lt;R, T&gt; <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/ops/generator/trait.Generator.html\" title=\"trait core::ops::generator::Generator\">Generator</a>&lt;R&gt; for <a class=\"struct\" href=\"connecteer_capabilities/identity/struct.SingleGen.html\" title=\"struct connecteer_capabilities::identity::SingleGen\">SingleGen</a>&lt;T&gt;"]]
+};if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
