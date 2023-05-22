@@ -14,8 +14,8 @@ pub trait Connection<Payload: Serialize + DeserializeOwned>: sealed::Sealed<Payl
     type ReceiveError;
     type NextError;
 
-    type SendGen<'s, 'c, 'g>: Generator<
-            (&'s mut Self, &'c mut Self::Ctx),
+    type SendGen<'s, 'c, 'g>: for<'ss, 'cc> Generator<
+            (&'ss mut Self, &'cc mut Self::Ctx),
             Yield = Result<Self::Wrapped, Self::SendError>,
             Return = (),
         > + 'g

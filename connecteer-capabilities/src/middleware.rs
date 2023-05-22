@@ -2,10 +2,6 @@ use crate::connection::Connection;
 use core::ops::{Generator, GeneratorState};
 use serde::{de::DeserializeOwned, Serialize};
 
-fn fuck_mut<'b, T: ?Sized>(v: &mut T) -> &'_ mut T {
-    unsafe { &mut *(v as *mut T) }
-}
-
 /// This is a trait that prevent an "outsider" to call some methods on trait, while still allowing
 /// you to implement those traits
 pub trait PublicUncallable: crate::sealed::PublicUncallableSealed {}
@@ -25,8 +21,8 @@ pub trait Middleware<Payload: Serialize + DeserializeOwned> {
     type Ctx;
     type Next: Connection<Self::Message>;
 
-    type WrapGen<'s, 'c, 'g>: Generator<
-            (&'s mut Self, &'c mut Self::Ctx),
+    type WrapGen<'s, 'c, 'g>: for<'ss, 'cc> Generator<
+            (&'ss mut Self, &'cc mut Self::Ctx),
             Yield = Result<Self::Message, Self::WrapError>,
             Return = (),
         > + 'g
@@ -79,6 +75,85 @@ impl<M: Middleware<Payload>, Payload: Serialize + DeserializeOwned + 'static>
 {
 }
 
+pub
+struct UnsafeHigherRankGenerator<'s, 'c, G, Conn, Ctx, Y, R>(
+    G,
+    ::core::marker::PhantomData<fn(&'s mut Conn, &'c mut Ctx) -> (Y, R)>,
+)
+where
+    Conn: 's,
+    Ctx: 'c,
+    G : Generator<
+        (&'s mut Conn, &'c mut Ctx),
+        Yield = Y,
+        Return = R,
+    >,
+;
+
+impl<'s, 'c, G, Conn, Ctx, Y, R>
+    UnsafeHigherRankGenerator<'s, 'c, G, Conn, Ctx, Y, R>
+where
+    Conn: 's,
+    Ctx: 'c,
+    G : Generator<
+        (&'s mut Conn, &'c mut Ctx),
+        Yield = Y,
+        Return = R,
+    >,
+{
+    pub unsafe fn new(g: G) -> Self {
+        Self(g, <_>::default())
+    }
+}
+
+impl<'s, 'c, G, Conn, Ctx, Y, R>
+    Generator<(&mut Conn, &mut Ctx)>
+for
+    UnsafeHigherRankGenerator<'s, 'c, G, Conn, Ctx, Y, R>
+where
+    Conn: 's,
+    Ctx: 'c,
+    G : Generator<
+        (&'s mut Conn, &'c mut Ctx),
+        Yield = Y,
+        Return = R,
+    >,
+{
+    type Yield = Y;
+    type Return = R;
+
+    fn resume(
+        self: ::core::pin::Pin<&mut Self>,
+        cx: (&mut Conn, &mut Ctx),
+    ) -> GeneratorState<Y, R>
+    {
+        unsafe {
+            self.map_unchecked_mut(|it| &mut it.0)
+        }
+        .resume(unsafe { ::core::mem::transmute(cx) })
+    }
+}
+
+fn constrain<'local, 'r, T : ?Sized>(
+    r: &'r mut T,
+    _: &'local (),
+) -> &'local mut T
+where
+    'r : 'local,
+{
+    r
+}
+
+macro_rules! anon_lifetime {( let $local:ident ) => (
+    let $local = &drop(());
+    macro_rules! yield_ {( $e:expr ) => (
+        match (yield $e) { (a, b) => (
+            constrain(a, $local),
+            constrain(b, $local),
+        )}
+    )}
+)}
+
 impl<M: Middleware<Payload> + 'static, Payload: Serialize + DeserializeOwned + 'static>
     Connection<Payload> for M
 {
@@ -89,12 +164,28 @@ impl<M: Middleware<Payload> + 'static, Payload: Serialize + DeserializeOwned + '
     type ReceiveError = M::UnwrapError;
     type NextError = <M::Next as Connection<M::Message>>::ReceiveError;
 
-    type SendGen<'s, 'c, 'g> =
-        impl Generator<(&'s mut Self,&'c mut Self::Ctx), Yield = Result<Self::Wrapped, Self::SendError>, Return = ()> + 'g where Self::Ctx: 'c, Self: 's;
     type ReceiveGen<'s, 'c, 'g>=
-        impl Generator<(&'s mut Self,&'c mut Self::Ctx), Yield = Result<Self::Wrapped, Self::ReceiveError>, Return = ()> + 'g where Self::Ctx: 'c, Self: 's;
+        impl Generator<
+            (&'s mut Self, &'c mut Self::Ctx),
+            Yield = Result<Self::Wrapped, Self::ReceiveError>,
+            Return = ()
+        > + 'g
+    where
+        Self::Ctx: 'c,
+        Self: 's,
+    ;
 
-    #[allow(unreachable_code)]
+    type SendGen<'ss, 'cc, 'g> =
+        impl for<'s, 'c> Generator<
+            (&'s mut Self, &'c mut Self::Ctx),
+            Yield = Result<Self::Wrapped, Self::SendError>,
+            Return = ()
+        > + 'g
+    where
+        Self::Ctx: 'cc,
+        Self: 'ss,
+    ;
+
     fn send<'a, 'b, 'g>(
         input: Payload,
         _: crate::sealed::PublicUncallable,
@@ -103,40 +194,41 @@ impl<M: Middleware<Payload> + 'static, Payload: Serialize + DeserializeOwned + '
         Self: 'a,
         Self::Ctx: 'b,
     {
-        move |(mut s, mut ctx): (&'a mut Self, &'b mut Self::Ctx)| {
+        let gen = static move |(s, ctx): (&'_ mut Self, &'_ mut Self::Ctx)| {
+            anon_lifetime!(let local);
+            let mut s = constrain(s, local);
+            let mut ctx = constrain(ctx, local);
             let mut gen_ptr = M::wrap::<crate::sealed::PublicUncallable>(input);
             let _pin = core::marker::PhantomPinned;
             loop {
-                match unsafe { core::pin::Pin::new_unchecked(fuck_mut(&mut gen_ptr)) }
-                    .resume((fuck_mut(s), fuck_mut(ctx)))
+                match unsafe { core::pin::Pin::new_unchecked(&mut gen_ptr) }
+                    .resume((s, ctx))
                 {
                     GeneratorState::Yielded(Ok(v)) => {
                         let mut ret = <M::Next>::send(v, crate::sealed::PublicUncallable);
-                        let next = fuck_mut(s.get_next::<crate::sealed::PublicUncallable>());
+                        let next = s.get_next::<crate::sealed::PublicUncallable>();
                         while let GeneratorState::Yielded(v) =
-                            unsafe { core::pin::Pin::new_unchecked(fuck_mut(&mut ret)) }.resume((
-                                fuck_mut(next),
-                                M::get_next_ctx::<crate::sealed::PublicUncallable>(fuck_mut(ctx)),
+                            unsafe { core::pin::Pin::new_unchecked(&mut ret) }.resume((
+                                next,
+                                M::get_next_ctx::<crate::sealed::PublicUncallable>(ctx),
                             ))
                         {
-                            let y = v.map_err(|e| {
-                                s.create_wrap_error::<crate::sealed::PublicUncallable>(e)
+                            let y = v.map_err(|_e| {
+                                // s.create_wrap_error::<crate::sealed::PublicUncallable>(e)
+                                todo!()
                             });
-                            let tmp = yield y;
-                            s = tmp.0;
-                            ctx = tmp.1;
+                            (s, ctx) = yield_!(y);
                         }
                         continue;
                     }
                     GeneratorState::Yielded(Err(e)) => {
-                        let tmp = yield Err(e);
-                        s = tmp.0;
-                        ctx = tmp.1;
+                        (s, ctx) = yield_!(Err(e));
                     }
                     GeneratorState::Complete(()) => return,
                 };
             }
-        }
+        };
+        unsafe { UnsafeHigherRankGenerator::new(gen) } 
     }
 
     #[allow(unreachable_code, dead_code, unused)]

@@ -1,4 +1,9 @@
-#![feature(impl_trait_in_assoc_type, generators, generator_trait)]
+#![feature(
+    // impl_trait_in_assoc_type,
+    generators,
+    generator_trait,
+    type_alias_impl_trait,
+)]
 #![no_std]
 
 //#![warn(clippy::pedantic)]
