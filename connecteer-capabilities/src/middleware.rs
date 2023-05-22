@@ -134,22 +134,27 @@ where
     }
 }
 
-fn constrain<'local, 'r, T : ?Sized>(
-    r: &'r mut T,
-    _: &'local (),
-) -> &'local mut T
-where
-    'r : 'local,
-{
-    r
+struct BetweenYields();
+
+impl BetweenYields {
+    fn adjust<'between_yields, 'too_big, ResumeArg : ?Sized>(
+        self: &'between_yields Self,
+        resume_arg: &'too_big mut ResumeArg,
+    ) -> &'between_yields mut ResumeArg
+    where
+        'too_big : 'between_yields,
+    {
+        resume_arg
+    }
 }
 
-macro_rules! anon_lifetime {( let $local:ident ) => (
-    let $local = &drop(());
+macro_rules! between_yields_lifetime {( as $lt:ident ) => (
+    #[allow(unused_mut)]
+    let mut $lt = BetweenYields();
     macro_rules! yield_ {( $e:expr ) => (
-        match (yield $e) { (a, b) => (
-            constrain(a, $local),
-            constrain(b, $local),
+        match (yield $e, $lt = BetweenYields()).0 { (a, b) => (
+            $lt.adjust(a),
+            $lt.adjust(b),
         )}
     )}
 )}
@@ -195,29 +200,26 @@ impl<M: Middleware<Payload> + 'static, Payload: Serialize + DeserializeOwned + '
         Self::Ctx: 'b,
     {
         let gen = static move |(s, ctx): (&'_ mut Self, &'_ mut Self::Ctx)| {
-            anon_lifetime!(let local);
-            let mut s = constrain(s, local);
-            let mut ctx = constrain(ctx, local);
-            let mut gen_ptr = M::wrap::<crate::sealed::PublicUncallable>(input);
+            between_yields_lifetime!(as lt);
+            let (mut s, mut ctx) = (lt.adjust(s), lt.adjust(ctx));
+            let mut gen_ptr = ::core::pin::pin!(M::wrap::<crate::sealed::PublicUncallable>(input));
             let _pin = core::marker::PhantomPinned;
             loop {
-                match unsafe { core::pin::Pin::new_unchecked(&mut gen_ptr) }
-                    .resume((s, ctx))
-                {
+                match gen_ptr.as_mut().resume((s, ctx)) {
                     GeneratorState::Yielded(Ok(v)) => {
-                        let mut ret = <M::Next>::send(v, crate::sealed::PublicUncallable);
-                        let next = s.get_next::<crate::sealed::PublicUncallable>();
+                        let mut ret = ::core::pin::pin!(<M::Next>::send(v, crate::sealed::PublicUncallable));
+                        let mut next = s.get_next::<crate::sealed::PublicUncallable>();
                         while let GeneratorState::Yielded(v) =
-                            unsafe { core::pin::Pin::new_unchecked(&mut ret) }.resume((
+                            ret.as_mut().resume((
                                 next,
                                 M::get_next_ctx::<crate::sealed::PublicUncallable>(ctx),
                             ))
                         {
                             let y = v.map_err(|_e| {
-                                // s.create_wrap_error::<crate::sealed::PublicUncallable>(e)
-                                todo!()
+                                s.create_wrap_error::<crate::sealed::PublicUncallable>(_e)
                             });
                             (s, ctx) = yield_!(y);
+                            next = s.get_next::<crate::sealed::PublicUncallable>();
                         }
                         continue;
                     }
